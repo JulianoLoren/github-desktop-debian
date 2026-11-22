@@ -1,5 +1,6 @@
 out/
 dist/
+*.deb
 node_modules/
 coverage/
 npm-debug.log

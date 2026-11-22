@@ -69,3 +69,87 @@ Also:
 - **Follow the rules of the road.** For new upstream findings in released
   versions, follow [SECURITY.md](SECURITY.md) (private advisory reporting), not
   public issues.
+
+## Build the Debian package and bump the version on every task
+
+Every finished code task must end with a version bump and a `.deb` build in the
+same working session, so this checkout always has an installable package that
+matches the source.
+
+1. **Bump the version first, before building.** The single source of truth is
+   `version` in `app/package.json`. Use semver where the change type fits:
+   `patch` for fixes, `minor` for features, `major` for breaking changes. The
+   build scripts derive `dist/` names and update checks from this field, so do
+   not edit generated output by hand. `app/` is not an npm workspace, so npm's
+   `version` command cannot target it — edit the field directly:
+
+   ```shellsession
+   node -e "const f='app/package.json',p=require('./'+f),[a,b,c]=p.version.split('.');p.version=\`\${a}.\${b}.\${+c+1}\`;require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+   ```
+
+   Commit the version bump together with the change that motivated it, or as
+   its own commit directly before the build.
+
+2. **Build the distribution.** The Linux target is produced by the regular
+   packaging step; the `.deb` is made from that output.
+
+   ```shellsession
+   npm run build:prod
+   ```
+
+   The app is packaged to `dist/desktop-linux-x64/`.
+
+3. **Produce the `.deb`** from the packaged output into `dist/`, using
+   `dpkg-deb` directly so there is no extra toolchain to install. The version
+   must equal `app/package.json`, and the architecture comes from
+   `dpkg --print-architecture`.
+
+   ```shellsession
+   VERSION=$(node -p "require('./app/package.json').version")
+   ARCH=$(dpkg --print-architecture)
+   STAGE=$(mktemp -d)
+   mkdir -p "$STAGE/DEBIAN" "$STAGE/opt/GitHubDesktop" "$STAGE/usr/bin" \
+            "$STAGE/usr/share/applications" "$STAGE/usr/share/icons/hicolor/512x512/apps"
+   cp -a dist/desktop-linux-x64/. "$STAGE/opt/GitHubDesktop/"
+   ln -s /opt/GitHubDesktop/desktop "$STAGE/usr/bin/github-desktop"
+   cp app/static/linux/icon-logo.png "$STAGE/usr/share/icons/hicolor/512x512/apps/github-desktop.png"
+   cat > "$STAGE/DEBIAN/control" <<EOF
+   Package: github-desktop
+   Version: $VERSION
+   Section: vcs
+   Priority: optional
+   Architecture: $ARCH
+   Maintainer: Local build
+   Depends: libsecret-1-0, libxss1, libgtk-3-0, libnotify4, libnss3
+   Description: GitHub Desktop (local Linux build)
+   EOF
+   cat > "$STAGE/usr/share/applications/github-desktop.desktop" <<EOF
+   [Desktop Entry]
+   Name=GitHub Desktop
+   Exec=github-desktop %U
+   Icon=github-desktop
+   Type=Application
+   Categories=Development;VCS;
+   Terminal=false
+   EOF
+   dpkg-deb --build --root-owner-group "$STAGE" \
+     "dist/github-desktop_${VERSION}_${ARCH}.deb"
+   rm -rf "$STAGE"
+   ```
+
+   Follow [Desktop Entry](https://specifications.freedesktop.org/desktop-entry-spec/latest/)
+   for launch arguments. Keep the archive contents in `/opt/GitHubDesktop` so the
+   binary can find its bundled `resources`.
+
+4. **Verify before reporting done.** Install or inspect the package and confirm
+   it opens a window on this Ubuntu:
+
+   ```shellsession
+   dpkg-deb --info dist/github-desktop_<version>_amd64.deb
+   sudo dpkg -i dist/github-desktop_<version>_amd64.deb
+   github-desktop   # confirm the window opens, then quit
+   ```
+
+5. **Never commit build output.** `dist/`, `out/` and `*.deb` are ignored; the
+   `.deb` is a local artifact, not a source change. Only the version bump and
+   source edits are committed.
