@@ -140,6 +140,27 @@ matches the source.
    rm -rf "$STAGE"
    ```
 
+   **Normalise permissions before packaging.** `cp -a` preserves the mode of
+   the source checkout, which is often `750`/`700` for a root-owned working
+   copy. `dpkg` keeps those modes, so the install succeeds but no normal user
+   can read the files: `github-desktop` reports "command not found" (the symlink
+   target is untraversable) and the launcher disappears from the app drawer
+   because GNOME cannot read `Exec`. Always run, on the staged tree:
+
+   ```shellsession
+   find "$STAGE/opt" "$STAGE/usr" -type d -exec chmod 0755 {} +
+   find "$STAGE/opt/GitHubDesktop" -type f -exec chmod a+r {} +
+   find "$STAGE/opt/GitHubDesktop" -maxdepth 1 -type f -perm -u+x -exec chmod 0755 {} +
+   chmod 04755 "$STAGE/opt/GitHubDesktop/chrome-sandbox"   # Chromium setuid helper
+   ```
+
+   Then confirm with `dpkg-deb -c …deb` that `/opt/GitHubDesktop` is
+   `drwxr-xr-x root/root`, and unpack it as a non-root user to check it starts.
+
+   Add `DEBIAN/postinst` and `DEBIAN/postrm` that run
+   `update-desktop-database -q /usr/share/applications` so the menu entry appears
+   immediately instead of after the next login.
+
    `desktop-file-validate` must report nothing; make it a hard failure. Only
    registered main categories are allowed in `Categories` — `VCS;` is *not*
    one, and GNOME then never files the launcher in any menu, so the app is
