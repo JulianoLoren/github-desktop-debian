@@ -129,13 +129,23 @@ matches the source.
    Exec=github-desktop %U
    Icon=github-desktop
    Type=Application
-   Categories=Development;VCS;
+   Categories=Development;
+   MimeType=x-scheme-handler/x-github-desktop-auth;
    Terminal=false
    EOF
+   desktop-file-validate \
+     "$STAGE/usr/share/applications/github-desktop.desktop"
    dpkg-deb --build --root-owner-group "$STAGE" \
      "dist/github-desktop_${VERSION}_${ARCH}.deb"
    rm -rf "$STAGE"
    ```
+
+   `desktop-file-validate` must report nothing; make it a hard failure. Only
+   registered main categories are allowed in `Categories` — `VCS;` is *not*
+   one, and GNOME then never files the launcher in any menu, so the app is
+   missing from the app drawer even though it is installed. Keep exactly
+   `Development;`. The `MimeType` line registers the `x-github-desktop-auth`
+   scheme the app uses for OAuth callbacks.
 
    Follow [Desktop Entry](https://specifications.freedesktop.org/desktop-entry-spec/latest/)
    for launch arguments. Keep the archive contents in `/opt/GitHubDesktop` so the
@@ -153,3 +163,24 @@ matches the source.
 5. **Never commit build output.** `dist/`, `out/` and `*.deb` are ignored; the
    `.deb` is a local artifact, not a source change. Only the version bump and
    source edits are committed.
+
+6. **Publish the `.deb` as a GitHub release.** Every finished `.deb` build must
+   be pushed: commit and push the branch, tag the release commit, and upload the
+   package to a release on `origin`. Releases are how the built package actually
+   reaches a user, so an unpushed `.deb` counts as unfinished work.
+
+   ```shellsession
+   VERSION=$(node -p "require('./app/package.json').version")
+   git push origin HEAD
+   git tag -a "v${VERSION}" -m "GitHub Desktop ${VERSION} (Linux build)"
+   git push origin "v${VERSION}"
+   gh release create "v${VERSION}" \
+     "dist/github-desktop_${VERSION}_$(dpkg --print-architecture).deb" \
+     --title "GitHub Desktop ${VERSION}" \
+     --notes "Linux (.deb) build of ${VERSION}. Install with: sudo dpkg -i github-desktop_${VERSION}_amd64.deb"
+   ```
+
+   Confirm with `gh release view "v${VERSION}" --json tagName,assets` that the
+   tag and the `.deb` asset are both present. Re-running for an existing tag
+   means a new patch version, not a re-tag of published history — never move or
+   delete a release tag.
