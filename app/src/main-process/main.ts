@@ -32,6 +32,7 @@ import {
   withSourceMappedStack,
 } from '../lib/source-map-support'
 import { now } from './now'
+import { isLinuxSandboxUnavailable } from './linux-sandbox'
 import { showUncaughtException } from './show-uncaught-exception'
 import { buildContextMenu } from './menu/build-context-menu'
 import { OrderedWebRequest } from './ordered-webrequest'
@@ -326,6 +327,24 @@ function setAsDefaultProtocolClient(protocol: string) {
   } else {
     app.setAsDefaultProtocolClient(protocol)
   }
+}
+
+/**
+ * Some distributions (Ubuntu 24.04 and later) restrict unprivileged user
+ * namespace creation through AppArmor. Electron's sandbox depends on user
+ * namespaces, so without this every child process fails to launch and the
+ * app never shows a window. The packaged builds ship an AppArmor profile
+ * which makes those sandboxed processes continue to work; for locally built
+ * apps we fall back to Chromium's namespace sandbox, which does not need
+ * unprivileged user namespaces.
+ *
+ * Must run before Electron creates any child process, i.e. before 'ready'.
+ */
+if (__LINUX__ && isLinuxSandboxUnavailable()) {
+  log.warn(
+    'Unprivileged user namespaces are restricted, using the namespace sandbox'
+  )
+  app.commandLine.appendSwitch('disable-features', 'UserNamespacesSandbox')
 }
 
 if (process.env.GITHUB_DESKTOP_DISABLE_HARDWARE_ACCELERATION) {
